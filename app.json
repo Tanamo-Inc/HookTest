@@ -1,0 +1,6 @@
+{
+  "name": "API.AI Wikipedia webhook",
+  "description": "API.AI Wikipedia api Webhook.",
+  "repository": "https://github.com/Tanamo-Inc/HookTest",
+  "keywords": ["api.ai", "natural language"]
+}
