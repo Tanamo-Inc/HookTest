@@ -3,21 +3,21 @@
 from __future__ import print_function
 from future.standard_library import install_aliases
 install_aliases()
+
 from urllib.parse import urlparse, urlencode
 from urllib.request import urlopen, Request
-import requests
-from xml.dom import minidom
-
+from urllib.error import HTTPError
 
 import json
 import os
-
 
 from flask import Flask
 from flask import request
 from flask import make_response
 
+
 app = Flask(__name__)
+
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -26,62 +26,75 @@ def webhook():
     print("Request:")
     print(json.dumps(req, indent=4))
 
-    title = search(req)
-    res = get_answer(title)
+    res = processRequest(req)
+
     res = json.dumps(res, indent=4)
+    print("response: ")
+    print(res)
     r = make_response(res)
     r.headers['Content-Type'] = 'application/json'
+    
+    print("r: ")
+    print(r)
+    
     return r
 
-def search(req):
-    if req.get("result").get("action") != "WikipediaSearch":
-        return {}
-    baseurl = "https://en.wikipedia.org/w/api.php?"
+
+def processRequest(req):
+    
+    baseurl = "https://query.yahooapis.com/v1/public/yql?"
     yql_query = makeYqlQuery(req)
-    print (yql_query)
     if yql_query is None:
         return {}
-    query = urlencode({'search': yql_query})
-    wiki_query = {'action':'opensearch', 'format': 'xml',
-                  'namespace': '0', 'limit': '1', 'redirects':'resolve', 'warningsaserror':'1', 'utf8': '1'}
-    yql_url = baseurl + urlencode(wiki_query) + "&" + query
-    result = urlopen(yql_url).read().decode("utf8")
-    search_term = get_title(result)
-    return search_term
+    yql_url = baseurl + urlencode({'q': yql_query}) + "&format=json"
+    result = urlopen(yql_url).read()
+    data = json.loads(result)
+    res = makeWebhookResult(data)
+    
+    print("yahoo res:")
+    print(json.dumps(res, indent=4))
 
-def get_answer(title):
-    baseurl = "https://en.wikipedia.org/w/api.php?"
-
-    query = title.strip().replace(" ", "+")
-    wiki_query = {'action':'query', 'format': 'xml', 'prop': 'extracts',
-                  'list': '', 'redirects': '1', 'exintro': '', 'explaintext': ''}
-    yql_url = baseurl + urlencode(wiki_query) + "&titles=" + query
-    print ("ANSWER URL = " + yql_url)
-    result = requests.get(yql_url).text
-    print ("RESULT:\n" + result)
-    res = makeWebhookResult(result)
+    
     return res
 
-def get_title(data):
-    xmldoc = minidom.parseString(data)
-    url = xmldoc.getElementsByTagName('Text')[0].childNodes[0].data
-    title = url
-    return title
 
 def makeYqlQuery(req):
     result = req.get("result")
     parameters = result.get("parameters")
-    query = parameters.get("phrase")
-    if query is None:
+    city = parameters.get("geo-city")
+    if city is None:
         return None
-    print ('QUERY' + query)
-    return query
+
+    return "select * from weather.forecast where woeid in (select woeid from geo.places(1) where text='" + city + "')"
+
 
 def makeWebhookResult(data):
-    xmldoc = minidom.parseString(data)
-    extract = xmldoc.getElementsByTagName('extract')[0].childNodes[0].data
+    query = data.get('query')
+    if query is None:
+        return {}
 
-    speech = extract
+    result = query.get('results')
+    if result is None:
+        return {}
+
+    channel = result.get('channel')
+    if channel is None:
+        return {}
+
+    item = channel.get('item')
+    location = channel.get('location')
+    units = channel.get('units')
+    if (location is None) or (item is None) or (units is None):
+        return {}
+
+    condition = item.get('condition')
+    if condition is None:
+        return {}
+
+    # print(json.dumps(item, indent=4))
+
+    speech = "Today in " + location.get('city') + ": " + condition.get('text') + \
+             ", the temperature is " + condition.get('temp') + " " + units.get('temperature')
 
     print("Response:")
     print(speech)
@@ -91,8 +104,9 @@ def makeWebhookResult(data):
         "displayText": speech,
         # "data": data,
         # "contextOut": [],
-        "source": "apiai-wikipedia-webhook"
+        "source": "apiai-weather-webhook-sample"
     }
+
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
